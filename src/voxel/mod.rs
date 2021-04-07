@@ -14,7 +14,7 @@ use crate::custom_mesh::MeshData;
 
 pub const TILE_DIMENSIONS: TileDimensions = TileDimensions {
     x: 1.0,
-    y: 0.25,
+    y: 1.0,
     z: 1.0,
 };
 

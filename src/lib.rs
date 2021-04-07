@@ -1,3 +1,5 @@
+#![feature(cmp_min_max_by)]
+
 use gdnative::prelude::*;
 
 mod custom_mesh;

@@ -1055,27 +1055,21 @@ fn get_direction_of_edge(pt1: Vector3, pt2: Vector3, center: Vector3) -> Point {
     }
 
     let average_dir = heading.normalize();
-
-    let dir = vec![forward_dir, left_dir, back_dir]
-        .into_iter()
-        .max_by(|a,b| 
-            a.dot(average_dir).partial_cmp(&b.dot(average_dir)).unwrap()
-        ).unwrap();
     
-
-    // let dir = std::cmp::max_by(forward_dir, 
-    //     std::cmp::max_by(left_dir, 
-    //         std::cmp::max_by(back_dir, 
-    //             right_dir, |lh, rh|{
-    //                 lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
-    //             }), 
-    //         |lh, rh| {
-    //             lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
-    //         }), 
-    //     |lh, rh| {
-    //         lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
-    //     }
-    // );
+    //TODO: remove dependency on nightly
+    let dir = std::cmp::max_by(forward_dir, 
+        std::cmp::max_by(left_dir, 
+            std::cmp::max_by(back_dir, 
+                right_dir, |lh, rh|{
+                    lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
+                }), 
+            |lh, rh| {
+                lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
+            }), 
+        |lh, rh| {
+            lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
+        }
+    );
 
     Point::new(dir.x as i32, dir.y as i32, dir.z as i32)
 }
