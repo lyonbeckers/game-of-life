@@ -7,7 +7,7 @@ reloadable=true
 
 [entry]
 
-Windows.64="res://target/x86_64-pc-windows_gnu/debug/game_of_life.dll"
+Windows.64="res://target/x86_64-pc-windows_gnu/release/game_of_life.dll"
 
 [dependencies]
 
