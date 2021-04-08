@@ -1,0 +1,85 @@
+[gd_scene load_steps=6 format=2]
+
+[ext_resource path="res://VoxelMesh.gdns" type="Script" id=1]
+[ext_resource path="res://vm_controller.gd" type="Script" id=2]
+[ext_resource path="res://pickaxe.tscn" type="PackedScene" id=3]
+
+[sub_resource type="GDScript" id=1]
+script/source = "extends Spatial
+
+var position = Vector3(0,0,0)
+
+func _ready():
+	pass
+	
+func _process(delta):
+	var focal_point = position + Vector3(0.5, 1.0, 0.5)
+	$pickaxe.transform.origin = focal_point + Vector3(0.25, 0.0, -0.25)
+	$camera_controller.heading = focal_point
+	
+func _input(event):
+	if event.is_action_pressed(\"move_left\"):
+		position.x -= 1
+	if event.is_action_pressed(\"move_right\"):
+		position.x += 1
+	if event.is_action_pressed(\"move_forward\"):
+		position.z -= 1
+	if event.is_action_pressed(\"move_back\"):
+		position.z += 1
+	
+	position.x = max(position.x, 0)
+	position.z = max(position.z, 0)
+	position.x = min(position.x, $voxel_mesh_controller.width - 1)
+	position.z = min(position.z, $voxel_mesh_controller.height - 1)
+	
+	if event.is_action_pressed(\"action_trigger\"):
+		var neighbors = [
+			position + Vector3(1,0,0),
+			position + Vector3(-1,0,0),
+			position + Vector3(0,0,1),
+			position + Vector3(0,0,-1),
+		]
+		var can_dig = $voxel_mesh_controller.tile_nutrients.has(position);
+		
+		if !can_dig: return
+		
+		can_dig = !$voxel_mesh_controller.tile_nutrients.has_all(neighbors)
+					
+		if !can_dig: return
+		
+		$voxel_mesh_controller.remove_point(position)
+"
+
+[sub_resource type="GDScript" id=2]
+script/source = "extends Spatial
+
+var heading = Vector3(0,0,0)
+
+# Called when the node enters the scene tree for the first time.
+func _ready():
+	pass # Replace with function body.
+
+func _process(delta):
+	transform.origin = heading
+	$camera.look_at(transform.origin, Vector3.UP)
+"
+
+[node name="Spatial" type="Spatial"]
+script = SubResource( 1 )
+
+[node name="voxel_mesh_controller" type="Node" parent="."]
+script = ExtResource( 2 )
+width = 50
+height = 50
+
+[node name="voxel_mesh" type="Node" parent="voxel_mesh_controller"]
+script = ExtResource( 1 )
+
+[node name="pickaxe" parent="." instance=ExtResource( 3 )]
+transform = Transform( 2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 1, 0 )
+
+[node name="camera_controller" type="Spatial" parent="."]
+script = SubResource( 2 )
+
+[node name="camera" type="Camera" parent="camera_controller"]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 2 )
