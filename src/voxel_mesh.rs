@@ -29,6 +29,8 @@ impl VoxelMesh {
             schedule: Schedule::builder()
                 .add_thread_local(custom_mesh::create_tag_system(owner))
                 .flush()
+                .add_thread_local(voxel::mesh::create_visibility_notifier_system(owner))
+                .flush()
                 .add_system(voxel::mesh::create_default_material_components_system(
                     "res://materials/ground.material",
                 ))

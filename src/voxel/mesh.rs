@@ -7,10 +7,11 @@ use std::collections::HashSet;
 use rayon::prelude::*;
 use octree::PointData;
 use gdnative::prelude::*;
+use gdnative::api::VisibilityNotifier;
 use lazy_static::lazy_static;
 use legion::*;
 use super::*;
-use crate::{Aabb, Point, Vector3D, custom_mesh}; 
+use crate::{Aabb, Point, Vector3D, custom_mesh, node}; 
 
 const TILE_PIXELS: f32 = 64.;
 const SHEET_PIXELS: f32 = 1024.;
@@ -62,12 +63,54 @@ pub fn create_default_material_components_system(material: &'static str) -> impl
         })
 }
 
+pub fn create_visibility_notifier_system(node: Ref<Node>) -> impl systems::Runnable {
+    SystemBuilder::new("visibility_notifier_system")
+        .with_query(<(Entity, Read<MapChunkData>)>::query()
+            .filter(component::<custom_mesh::MeshData>() & !component::<VisibilityNotifierNode>())
+        )
+        .build(move |commands, world, _, query| {
+
+            let entities = query.iter(world)
+                .map(|(entity, map_data)| (*entity, (*map_data).clone()))
+                .collect::<Vec<(Entity, MapChunkData)>>();
+
+            entities.into_iter().for_each(|(entity, map_data)| {
+                commands.exec_mut(move |world, _| {
+
+                    let visibility_node = VisibilityNotifier::new();
+
+                    let node = unsafe { node::add_node(&node.assume_safe(), visibility_node.upcast()) };
+                    let visibility_node = unsafe { node.assume_safe() }.cast::<VisibilityNotifier>().unwrap();
+
+                    let aabb = map_data.octree.get_aabb();
+                    let min = aabb.get_min();
+                    println!("aabb: {:?}", aabb);
+                    visibility_node.set_aabb(gdnative::prelude::Aabb{
+                        position: Vector3::new(min.x as f32, min.y as f32, min.z as f32), 
+                        size: Vector3::new(aabb.dimensions.x as f32, aabb.dimensions.y as f32, aabb.dimensions.z as f32)
+                    });
+
+                    if let Some(mut entry) = world.entry(entity) {
+                        entry.add_component(VisibilityNotifierNode {
+                            node: unsafe { visibility_node.assume_shared() }
+                        });
+                    }
+                })
+            })
+        })
+}
+
+#[derive(Clone)]
+struct VisibilityNotifierNode {
+    node: Ref<VisibilityNotifier>
+}
+
 #[allow(clippy::many_single_char_names)] 
 pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
 
     let mut batch_index: u32 = 0;
 
-    let mut changed_query = <Entity>::query().filter(!component::<Batched>() & component::<MapChunkData>() & component::<ManuallyChange>());
+    let mut changed_query = <(Entity, Read<VisibilityNotifierNode>)>::query().filter(!component::<Batched>() & component::<MapChunkData>() & component::<ManuallyChange>());
     let mut batched_query = <(Entity, Read<MapChunkData>, Read<ManuallyChange>, Read<Batched>)>::query();
     let mut map_query = <(Entity, Read<MapChunkData>, Read<Point>)>::query();
     let mut write_mesh_query = <(Entity, Write<MapMeshData>, Write<custom_mesh::MeshData>, Read<ManuallyChange>)>::query();
@@ -78,7 +121,12 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
             .map(|(entity, map_data, point)| (*entity, (*map_data).clone(), *point))
             .collect::<Vec<(Entity, MapChunkData, Point)>>();
 
-        let unbatched_entities = changed_query.iter(world).copied()
+        let unbatched_entities = changed_query.iter(world)
+            .collect::<Vec<(&Entity, &VisibilityNotifierNode)>>()
+            .into_iter()
+            .filter_map(|(entity, visibility_notifier)| {
+                unsafe { visibility_notifier.node.assume_safe() }.is_on_screen().then(|| *entity)
+            })
             .collect::<Vec<Entity>>();
 
         let unbatched_iter = unbatched_entities.into_iter();
@@ -106,7 +154,6 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
 
         if let Some((entity, map_data, change, batch)) = batched_iter.next().map(|(entity, map_data, change, batch)| (*entity, (*map_data).clone(), (*change).clone(), *batch)) {
             entities.push((entity, map_data, change));
-
             entities.extend(batched_iter.filter(|(_,_,_,b)| **b == batch).map(|(entity, map_data, change, _)| (*entity, (*map_data).clone(), (*change).clone())));
         }
 
