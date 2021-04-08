@@ -13,7 +13,7 @@ func _ready():
 	pass
 	
 func _process(delta):
-	var focal_point = position + Vector3(0.5, 1, 0.5)
+	var focal_point = position + Vector3(0.5, 1.0, 0.5)
 	$pickaxe.transform.origin = focal_point + Vector3(0.25, 0.0, -0.25)
 	$camera_controller.heading = focal_point
 	
@@ -82,4 +82,4 @@ transform = Transform( 2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 1, 0 )
 script = SubResource( 2 )
 
 [node name="camera" type="Camera" parent="camera_controller"]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5 )
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 2 )
