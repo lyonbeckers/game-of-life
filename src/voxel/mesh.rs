@@ -163,7 +163,7 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
 
         let mut batched_entities =
             batched_query
-                .par_iter(world)
+                .iter(world)
                 .collect::<Vec<(&Entity, &MapChunkData, &ManuallyChange, &Batched)>>();
 
         batched_entities.sort_by(|(_, _, _, a), (_, _, _, b)| a.0.cmp(&b.0));
