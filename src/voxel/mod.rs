@@ -7,6 +7,7 @@ use crate::{Aabb, Octree, Point};
 
 use crate::custom_mesh;
 use legion::*;
+use rayon::prelude::*;
 use tile_data::TileData;
 
 #[cfg(not(test))]
@@ -162,9 +163,9 @@ impl Map {
 
             //Remove any data that is in map_set but not set
             let difference = map_set.difference(&set);
-            for item in difference {
+            difference.into_iter().for_each(|item| {
                 map_data.octree.remove_item(item);
-            }
+            });
 
             //Add any data that is in set but not map_set
             let difference = set.difference(&map_set);

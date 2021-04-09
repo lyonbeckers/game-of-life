@@ -46,8 +46,11 @@ impl VoxelMesh {
 
     #[export]
     fn _ready(&mut self, _owner: &Node) {
-        self.resources
-            .insert(voxel::Map::new(Point::new(self.width, self.height, self.depth)));
+        self.resources.insert(voxel::Map::new(Point::new(
+            self.width,
+            self.height,
+            self.depth,
+        )));
     }
 
     #[export]
@@ -70,32 +73,33 @@ impl VoxelMesh {
     fn remove_point(&mut self, _owner: &Node, x: i32, y: i32, z: i32) {
         if let Some(map) = self.resources.get::<voxel::Map>() {
             let point = Point::new(x, y, z);
-            let octree =
-                Octree::new(Aabb::new(point, Point::new(1, 1, 1)), octree::DEFAULT_MAX);
+            let octree = Octree::new(Aabb::new(point, Point::new(1, 1, 1)), octree::DEFAULT_MAX);
             map.change(&mut self.world, octree);
         }
     }
 
     #[export]
     fn insert_points(&mut self, _owner: &Node, points: VariantArray) {
-
         if let Some(map) = self.resources.get::<voxel::Map>() {
-
-            let tiles = points.into_iter().filter_map(|v| {
-                Dictionary::from_variant(&v)
-                    .and_then(|v| {
-                        let pt = v.get("point"); 
-                        let tile = v.get("tile");
-                        Vector3::from_variant(&pt).and_then(|pt| {
-                            u32::from_variant(&tile).and_then(|tile| {
-                                Ok(TileData::new(
-                                    Point::new(pt.x as i32, pt.y as i32, pt.z as i32),
-                                    tile,
-                                ))
+            let tiles = points
+                .into_iter()
+                .filter_map(|v| {
+                    Dictionary::from_variant(&v)
+                        .and_then(|v| {
+                            let pt = v.get("point");
+                            let tile = v.get("tile");
+                            Vector3::from_variant(&pt).and_then(|pt| {
+                                u32::from_variant(&tile).and_then(|tile| {
+                                    Ok(TileData::new(
+                                        Point::new(pt.x as i32, pt.y as i32, pt.z as i32),
+                                        tile,
+                                    ))
+                                })
                             })
                         })
-                    }).ok()
-            }).collect::<Vec<TileData>>();
+                        .ok()
+                })
+                .collect::<Vec<TileData>>();
 
             let mut min = Point::new(i32::MAX, i32::MAX, i32::MAX);
             let mut max = Point::new(i32::MIN, i32::MIN, i32::MIN);
@@ -112,7 +116,9 @@ impl VoxelMesh {
             });
 
             let mut octree = Octree::new(Aabb::from_extents(min, max), octree::DEFAULT_MAX);
-            tiles.into_iter().for_each(|tile_data| { octree.insert(tile_data).ok(); });
+            tiles.into_iter().for_each(|tile_data| {
+                octree.insert(tile_data).ok();
+            });
 
             map.change(&mut self.world, octree);
         }

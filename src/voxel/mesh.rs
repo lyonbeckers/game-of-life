@@ -1,21 +1,19 @@
-/// Handles the creation and defining of mesh nodes in Godot
-
-use std::collections::HashMap;
-use std::sync::Arc;
-use parking_lot::Mutex;
-use std::collections::HashSet;
-use rayon::prelude::*;
-use octree::PointData;
-use gdnative::prelude::*;
-use gdnative::api::VisibilityNotifier;
+use super::*;
+use crate::{custom_mesh, node, Aabb, Point, Vector3D};
+use gdnative::{api::VisibilityNotifier, prelude::*};
 use lazy_static::lazy_static;
 use legion::*;
-use super::*;
-use crate::{Aabb, Point, Vector3D, custom_mesh, node}; 
+use octree::PointData;
+use parking_lot::Mutex;
+use rayon::prelude::*;
+/// Handles the creation and defining of mesh nodes in Godot
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 const TILE_PIXELS: f32 = 64.;
 const SHEET_PIXELS: f32 = 1024.;
-const TILE_SIZE: f32 = TILE_PIXELS/SHEET_PIXELS;
+const TILE_SIZE: f32 = TILE_PIXELS / SHEET_PIXELS;
 const BEVEL_SIZE: f32 = 0.2;
 const BEVEL_HEIGHT: f32 = 0.1;
 const START_REPEAT_ABOVE_HEIGHT: f32 = 2.;
@@ -24,17 +22,17 @@ const REPEAT_AMOUNT_ABOVE: f32 = 2.;
 const REPEAT_AMOUNT_BELOW: f32 = 1.;
 const WALL_VERTICAL_OFFSET: f32 = 9.;
 
-lazy_static!{
+lazy_static! {
     static ref NEIGHBOR_DIRS: [Point; 8] = [
-            Point::x(),
-            -Point::x(),
-            Point::z(),
-            -Point::z(),
-            Point::x()+Point::z(),
-            -Point::x()+Point::z(),
-            -Point::x()-Point::z(),
-            Point::x()-Point::z()
-        ];
+        Point::x(),
+        -Point::x(),
+        Point::z(),
+        -Point::z(),
+        Point::x() + Point::z(),
+        -Point::x() + Point::z(),
+        -Point::x() - Point::z(),
+        Point::x() - Point::z()
+    ];
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -42,18 +40,16 @@ struct Batched(u32);
 
 /// Adds additional required components
 pub fn create_default_material_components_system(material: &'static str) -> impl systems::Runnable {
-    
     SystemBuilder::new("map_mesh_add_components_system")
-        .with_query(<Entity>::query()
-            .filter(component::<custom_mesh::MeshData>())
-            .filter(component::<MapChunkData>() & !component::<custom_mesh::Material>())
+        .with_query(
+            <Entity>::query()
+                .filter(component::<custom_mesh::MeshData>())
+                .filter(component::<MapChunkData>() & !component::<custom_mesh::Material>()),
         )
         .build(move |commands, world, _, query| {
-
             let entities = query.iter(world).copied().collect::<Vec<Entity>>();
 
             for entity in entities {
-
                 commands.exec_mut(move |world, _| {
                     if let Some(mut entry) = world.entry(entity) {
                         entry.add_component(custom_mesh::Material::from_str(material));
@@ -65,34 +61,42 @@ pub fn create_default_material_components_system(material: &'static str) -> impl
 
 pub fn create_visibility_notifier_system(node: Ref<Node>) -> impl systems::Runnable {
     SystemBuilder::new("visibility_notifier_system")
-        .with_query(<(Entity, Read<MapChunkData>)>::query()
-            .filter(component::<custom_mesh::MeshData>() & !component::<VisibilityNotifierNode>())
+        .with_query(
+            <(Entity, Read<MapChunkData>)>::query().filter(
+                component::<custom_mesh::MeshData>() & !component::<VisibilityNotifierNode>(),
+            ),
         )
         .build(move |commands, world, _, query| {
-
-            let entities = query.iter(world)
+            let entities = query
+                .iter(world)
                 .map(|(entity, map_data)| (*entity, (*map_data).clone()))
                 .collect::<Vec<(Entity, MapChunkData)>>();
 
             entities.into_iter().for_each(|(entity, map_data)| {
                 commands.exec_mut(move |world, _| {
-
                     let visibility_node = VisibilityNotifier::new();
 
-                    let node = unsafe { node::add_node(&node.assume_safe(), visibility_node.upcast()) };
-                    let visibility_node = unsafe { node.assume_safe() }.cast::<VisibilityNotifier>().unwrap();
+                    let node =
+                        unsafe { node::add_node(&node.assume_safe(), visibility_node.upcast()) };
+                    let visibility_node = unsafe { node.assume_safe() }
+                        .cast::<VisibilityNotifier>()
+                        .unwrap();
 
                     let aabb = map_data.octree.get_aabb();
                     let min = aabb.get_min();
                     println!("aabb: {:?}", aabb);
-                    visibility_node.set_aabb(gdnative::prelude::Aabb{
-                        position: Vector3::new(min.x as f32, min.y as f32, min.z as f32), 
-                        size: Vector3::new(aabb.dimensions.x as f32, aabb.dimensions.y as f32, aabb.dimensions.z as f32)
+                    visibility_node.set_aabb(gdnative::prelude::Aabb {
+                        position: Vector3::new(min.x as f32, min.y as f32, min.z as f32),
+                        size: Vector3::new(
+                            aabb.dimensions.x as f32,
+                            aabb.dimensions.y as f32,
+                            aabb.dimensions.z as f32,
+                        ),
                     });
 
                     if let Some(mut entry) = world.entry(entity) {
                         entry.add_component(VisibilityNotifierNode {
-                            node: unsafe { visibility_node.assume_shared() }
+                            node: unsafe { visibility_node.assume_shared() },
                         });
                     }
                 })
@@ -102,30 +106,44 @@ pub fn create_visibility_notifier_system(node: Ref<Node>) -> impl systems::Runna
 
 #[derive(Clone)]
 struct VisibilityNotifierNode {
-    node: Ref<VisibilityNotifier>
+    node: Ref<VisibilityNotifier>,
 }
 
-#[allow(clippy::many_single_char_names)] 
+#[allow(clippy::many_single_char_names)]
 pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
-
     let mut batch_index: u32 = 0;
 
-    let mut changed_query = <(Entity, Read<VisibilityNotifierNode>)>::query().filter(!component::<Batched>() & component::<MapChunkData>() & component::<ManuallyChange>());
-    let mut batched_query = <(Entity, Read<MapChunkData>, Read<ManuallyChange>, Read<Batched>)>::query();
+    let mut changed_query = <(Entity, Read<VisibilityNotifierNode>)>::query().filter(
+        !component::<Batched>() & component::<MapChunkData>() & component::<ManuallyChange>(),
+    );
+    let mut batched_query = <(
+        Entity,
+        Read<MapChunkData>,
+        Read<ManuallyChange>,
+        Read<Batched>,
+    )>::query();
     let mut map_query = <(Entity, Read<MapChunkData>, Read<Point>)>::query();
-    let mut write_mesh_query = <(Entity, Write<MapMeshData>, Write<custom_mesh::MeshData>, Read<ManuallyChange>)>::query();
+    let mut write_mesh_query = <(
+        Entity,
+        Write<MapMeshData>,
+        Write<custom_mesh::MeshData>,
+        Read<ManuallyChange>,
+    )>::query();
 
     Box::new(move |world, resources| {
-
-        let map_datas = map_query.iter(world)
+        let map_datas = map_query
+            .par_iter(world)
             .map(|(entity, map_data, point)| (*entity, (*map_data).clone(), *point))
             .collect::<Vec<(Entity, MapChunkData, Point)>>();
 
-        let unbatched_entities = changed_query.iter(world)
+        let unbatched_entities = changed_query
+            .par_iter(world)
             .collect::<Vec<(&Entity, &VisibilityNotifierNode)>>()
-            .into_iter()
+            .into_par_iter()
             .filter_map(|(entity, visibility_notifier)| {
-                unsafe { visibility_notifier.node.assume_safe() }.is_on_screen().then(|| *entity)
+                unsafe { visibility_notifier.node.assume_safe() }
+                    .is_on_screen()
+                    .then(|| *entity)
             })
             .collect::<Vec<Entity>>();
 
@@ -143,34 +161,47 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
             batch_index += 1;
         }
 
-        let mut batched_entities = batched_query.iter(world)
-            .collect::<Vec<(&Entity, &MapChunkData, &ManuallyChange, &Batched)>>();
+        let mut batched_entities =
+            batched_query
+                .par_iter(world)
+                .collect::<Vec<(&Entity, &MapChunkData, &ManuallyChange, &Batched)>>();
 
-        batched_entities.sort_by(|(_,_,_,a), (_,_,_,b)| a.0.cmp(&b.0));  
-        
+        batched_entities.sort_by(|(_, _, _, a), (_, _, _, b)| a.0.cmp(&b.0));
+
         let mut batched_iter = batched_entities.into_iter();
 
         let mut entities: Vec<(Entity, MapChunkData, ManuallyChange)> = Vec::new();
 
-        if let Some((entity, map_data, change, batch)) = batched_iter.next().map(|(entity, map_data, change, batch)| (*entity, (*map_data).clone(), (*change).clone(), *batch)) {
+        if let Some((entity, map_data, change, batch)) =
+            batched_iter
+                .next()
+                .map(|(entity, map_data, change, batch)| {
+                    (*entity, (*map_data).clone(), (*change).clone(), *batch)
+                })
+        {
             entities.push((entity, map_data, change));
-            entities.extend(batched_iter.filter(|(_,_,_,b)| **b == batch).map(|(entity, map_data, change, _)| (*entity, (*map_data).clone(), (*change).clone())));
+            entities.extend(batched_iter.filter(|(_, _, _, b)| **b == batch).map(
+                |(entity, map_data, change, _)| (*entity, (*map_data).clone(), (*change).clone()),
+            ));
         }
 
-        let (map_mesh_tx, map_mesh_rx) = crossbeam_channel::unbounded::<(Entity, HashMap<usize, VertexData>)>();
+        let (map_mesh_tx, map_mesh_rx) =
+            crossbeam_channel::unbounded::<(Entity, HashMap<usize, VertexData>)>();
 
-        let (done_changes_tx, done_changes_rx) = crossbeam_channel::unbounded::<(Entity, ChangeType)>();
-        
+        let (done_changes_tx, done_changes_rx) =
+            crossbeam_channel::unbounded::<(Entity, ChangeType)>();
+
         // Cycle through all of our entities, checking if the work would be more than an entire full chunk,
         // keep popping entities until it isn't.
         if let Some(map) = resources.get::<Map>() {
-
-            let chunk_volume = map.chunk_dimensions.x * map.chunk_dimensions.y * map.chunk_dimensions.z;
+            let chunk_volume =
+                map.chunk_dimensions.x * map.chunk_dimensions.y * map.chunk_dimensions.z;
 
             loop {
-                let combined_volume: i32 = entities.par_iter_mut().map(|(_, map_data, _)| {
-                    map_data.octree.count() as i32
-                }).sum();
+                let combined_volume: i32 = entities
+                    .par_iter_mut()
+                    .map(|(_, map_data, _)| map_data.octree.count() as i32)
+                    .sum();
 
                 if entities.len() > 1 && combined_volume > chunk_volume {
                     entities.pop();
@@ -779,7 +810,6 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
                 vert_data_rx.iter().for_each(|vert_data| {
                     combined_vert_data_tx.send(vert_data).ok();
                 });
-
                 
             });
 
@@ -795,16 +825,15 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
 
         }); //end of iterating through map chunks
 
-        let mut map_vert_datas = map_mesh_rx.into_iter().collect::<HashMap<Entity, HashMap<usize, VertexData>>>();
+        let mut map_vert_datas = map_mesh_rx
+            .into_iter()
+            .collect::<HashMap<Entity, HashMap<usize, VertexData>>>();
 
         if !map_vert_datas.is_empty() {
-
             let mut meshes_to_change: Vec<Entity> = Vec::with_capacity(entities.len());
 
             write_mesh_query.for_each_mut(world, |(entity, map_mesh_data, mesh_data, _)| {
-
                 if let Some(map) = map_vert_datas.get_mut(entity) {
-                    
                     meshes_to_change.push(*entity);
 
                     map.drain().for_each(|(index, data)| {
@@ -816,134 +845,168 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
 
                     let mut offset = 0;
                     map_mesh_data.cols.iter().for_each(move |vertex_data| {
-                        
                         mesh_data.verts.par_extend(vertex_data.verts.par_iter());
                         mesh_data.normals.par_extend(vertex_data.normals.par_iter());
                         mesh_data.uvs.par_extend(vertex_data.uvs.par_iter());
                         mesh_data.uv2s.par_extend(vertex_data.uv2s.par_iter());
-                        mesh_data.indices.par_extend(vertex_data.indices.par_iter().map(|i| i + offset));
-                        
+                        mesh_data
+                            .indices
+                            .par_extend(vertex_data.indices.par_iter().map(|i| i + offset));
+
                         offset += vertex_data.verts.len() as i32;
                     });
-
                 }
             });
 
             meshes_to_change.into_iter().for_each(|entity| {
                 if let Some(mut entry) = world.entry(entity) {
-                    entry.add_component(custom_mesh::ManuallyChange{});
+                    entry.add_component(custom_mesh::ManuallyChange {});
                 }
             });
-
         }
 
-        let (to_change_tx, to_change_rx) = crossbeam_channel::unbounded::<(Entity, Entity, Aabb, ChangeType)>();
+        let (to_change_tx, to_change_rx) =
+            crossbeam_channel::unbounded::<(Entity, Entity, Aabb, ChangeType)>();
 
         if let Some(map) = resources.get::<Map>() {
+            entities.par_iter().for_each_with(
+                to_change_tx,
+                |to_change_tx, (entity, map_data, change)| {
+                    let chunk_pt = map_data.get_chunk_point();
 
-            entities.par_iter().for_each_with(to_change_tx, |to_change_tx, (entity, map_data, change)| {
+                    change.ranges.iter().for_each(|change| {
+                        //only manually change neighbors if it comes from a direct change
+                        if let ChangeType::Direct(aabb) = change {
+                            let min = aabb.get_min();
+                            let max = aabb.get_max();
 
-                let chunk_pt = map_data.get_chunk_point();
+                            // grab a region below to ensure updates to lower adjacent chunks happen (for the edge lip texture, for instance)
+                            let extended_aabb = Aabb::from_extents(
+                                min - Point::new(1, 5, 1),
+                                max + Point::new(1, 1, 1),
+                            );
 
-                change.ranges.iter().for_each(|change| {
-                        
-                    //only manually change neighbors if it comes from a direct change
-                    if let ChangeType::Direct(aabb) = change {
+                            let neighbors = map.chunks_in_range(map_datas.clone(), extended_aabb);
 
-                        let min = aabb.get_min();
-                        let max = aabb.get_max();
+                            neighbors
+                                .into_iter()
+                                .filter(|(_, neighbor_data)| {
+                                    neighbor_data.get_chunk_point() != chunk_pt
+                                })
+                                .for_each(|(neighbor_entity, neighbor_data)| {
+                                    let map_aabb = neighbor_data.octree.get_aabb();
 
-                        // grab a region below to ensure updates to lower adjacent chunks happen (for the edge lip texture, for instance)
-                        let extended_aabb = Aabb::from_extents(min - Point::new(1,5,1), max + Point::new(1,1,1));
-
-                        let neighbors = map.chunks_in_range(map_datas.clone(), extended_aabb);
-
-                        neighbors.into_iter().filter(|(_, neighbor_data)| neighbor_data.get_chunk_point() != chunk_pt).for_each(|(neighbor_entity, neighbor_data)| {
-                            
-                            let map_aabb = neighbor_data.octree.get_aabb();
-
-                            to_change_tx.send((neighbor_entity, *entity, map_aabb, ChangeType::Indirect(*aabb))).unwrap();
-                        });
-                    }
-                });
-            });
+                                    to_change_tx
+                                        .send((
+                                            neighbor_entity,
+                                            *entity,
+                                            map_aabb,
+                                            ChangeType::Indirect(*aabb),
+                                        ))
+                                        .unwrap();
+                                });
+                        }
+                    });
+                },
+            );
         }
 
-        let done_changes = done_changes_rx.into_iter().collect::<Vec<(Entity, ChangeType)>>();
+        let done_changes = done_changes_rx
+            .into_iter()
+            .collect::<Vec<(Entity, ChangeType)>>();
 
         //Push indirect changes to their entities
-        to_change_rx.into_iter().for_each(|(neighbor_entity, entity, map_aabb, change)| {
+        to_change_rx
+            .into_iter()
+            .for_each(|(neighbor_entity, entity, map_aabb, change)| {
+                let batched: Option<Batched> = world
+                    .entry(entity)
+                    .and_then(|entry| entry.get_component::<Batched>().ok().copied());
 
-            let batched: Option<Batched> = world.entry(entity).and_then(|entry| {
-                entry.get_component::<Batched>().ok().copied()
-            });
+                if let Some(mut neighbor_entry) = world.entry(neighbor_entity) {
+                    let neighbor_batched = neighbor_entry.get_component::<Batched>().ok().copied();
 
-            if let Some(mut neighbor_entry) = world.entry(neighbor_entity) {
+                    if batched == neighbor_batched {
+                        return {};
+                    }
 
-                let neighbor_batched = neighbor_entry.get_component::<Batched>().ok().copied();
+                    if let ChangeType::Indirect(change_aabb) = change {
+                        match neighbor_entry.get_component_mut::<ManuallyChange>() {
+                            Ok(manually_change) => {
+                                let change_aabb = change_aabb.get_intersection(map_aabb);
 
-                if batched == neighbor_batched {
-                    return {}
-                }
+                                let mut push = true;
 
-                if let ChangeType::Indirect(change_aabb) = change {
-                                        
-                    match neighbor_entry.get_component_mut::<ManuallyChange>() {
-                        Ok(manually_change) => { 
+                                for component_change in &manually_change.ranges {
+                                    match component_change {
+                                        ChangeType::Indirect(range) | ChangeType::Direct(range) => {
+                                            let range = range.get_intersection(map_aabb);
 
-                            let change_aabb = change_aabb.get_intersection(map_aabb);
-
-                            let mut push = true;
-
-                            for component_change in &manually_change.ranges {
-                                match component_change {
-                                    ChangeType::Indirect(range) | ChangeType::Direct(range) => {
-                                        let range = range.get_intersection(map_aabb);
-
-                                        // If the change is the same as another change that has already been processed, forget it
-                                        if change_aabb.get_intersection(range) == change_aabb {
-
-                                            push = false;
-                                            break;
+                                            // If the change is the same as another change that has already been processed, forget it
+                                            if change_aabb.get_intersection(range) == change_aabb {
+                                                push = false;
+                                                break;
+                                            }
                                         }
-                                    }, _ => {}
+                                        _ => {}
+                                    }
+                                }
+
+                                if push {
+                                    manually_change.ranges.push(change);
                                 }
                             }
-                                    
-                            if push {
-                                manually_change.ranges.push(change);
-                            }
-                        },
-                        _ => neighbor_entry.add_component(ManuallyChange{ ranges: vec![change] })
+                            _ => neighbor_entry.add_component(ManuallyChange {
+                                ranges: vec![change],
+                            }),
+                        }
                     }
                 }
-            }
-        });
+            });
 
         entities.into_iter().for_each(|(entity, _, _)| {
-
             if let Some(mut entry) = world.entry(entity) {
                 //remove the worked on changes so vertices don't get defined again next frame
                 if let Ok(manually_change) = entry.get_component_mut::<ManuallyChange>() {
-
                     let mut ranges_iter = manually_change.ranges.clone().into_iter();
 
-                    manually_change.ranges = manually_change.ranges.iter().filter(|c| {
-                        match c {
-                            ChangeType::Indirect(_) if done_changes.iter().any(|(_, d)| d == *c) => false,
-                            _ => true
-                        }
-                    }).map(|c| {
-                        match c {
-                            ChangeType::Direct(aabb) if done_changes.iter().any(|(_, d)| d == c) => ChangeType::Changed(*aabb),
-                            _ => *c
-                        }
-                    }).collect();
+                    manually_change.ranges = manually_change
+                        .ranges
+                        .iter()
+                        .filter(|c| match c {
+                            ChangeType::Indirect(_)
+                                if done_changes.iter().any(|(_, d)| d == *c) =>
+                            {
+                                false
+                            }
+                            _ => true,
+                        })
+                        .map(|c| match c {
+                            ChangeType::Direct(aabb)
+                                if done_changes.iter().any(|(_, d)| d == c) =>
+                            {
+                                ChangeType::Changed(*aabb)
+                            }
+                            _ => *c,
+                        })
+                        .collect();
 
                     // If there are no direct changes left
-                    if !ranges_iter.any(|c| if let ChangeType::Direct(_) = c {true} else {false}) {
+                    if !ranges_iter.any(|c| {
+                        if let ChangeType::Direct(_) = c {
+                            true
+                        } else {
+                            false
+                        }
+                    }) {
                         //if there are no indirect changes left
-                        if !ranges_iter.any(|c| if let ChangeType::Indirect(_) = c {true} else {false}) {
+                        if !ranges_iter.any(|c| {
+                            if let ChangeType::Indirect(_) = c {
+                                true
+                            } else {
+                                false
+                            }
+                        }) {
                             manually_change.ranges.drain(0..);
                         }
                     }
@@ -952,16 +1015,19 @@ pub fn create_drawing_system() -> Box<dyn FnMut(&mut World, &mut Resources)> {
                         entry.remove_component::<ManuallyChange>();
                         entry.remove_component::<Batched>();
                     }
-                    
                 }
             }
         });
-        
     })
-} 
+}
 
 /// Get the true top of this vertical column of tiles regardless of chunk subdivisions
-fn get_true_top(pt: Point, map_datas: &[(Entity, MapChunkData, Point)], map_data: &MapChunkData, _checked: &HashSet<Point>) -> Point {
+fn get_true_top(
+    pt: Point,
+    map_datas: &[(Entity, MapChunkData, Point)],
+    map_data: &MapChunkData,
+    _checked: &HashSet<Point>,
+) -> Point {
     let mut true_top = pt;
 
     let chunk_max = map_data.octree.get_aabb().get_max();
@@ -971,28 +1037,24 @@ fn get_true_top(pt: Point, map_datas: &[(Entity, MapChunkData, Point)], map_data
         true_top.y = chunk_min.y;
     }
 
-    while true_top.y <= chunk_max.y+1 {
-
+    while true_top.y <= chunk_max.y + 1 {
         match map_data.octree.query_point(true_top) {
-            Some(_) => {
-
-            },
+            Some(_) => {}
             None if true_top.y > chunk_max.y => {
-                let chunk_pt_above = map_data.get_chunk_point()+Point::y();
+                let chunk_pt_above = map_data.get_chunk_point() + Point::y();
 
-                match map_datas.iter().find(|(_,_,pt)| *pt == chunk_pt_above) {
+                match map_datas.iter().find(|(_, _, pt)| *pt == chunk_pt_above) {
                     Some((_, map_data, _)) => {
                         true_top = get_true_top(true_top, map_datas, &map_data, _checked);
                         return true_top;
-                    },
-                    None => break
+                    }
+                    None => break,
                 }
-            },
-            None => break
+            }
+            None => break,
         }
 
         true_top.y += 1;
-
     }
 
     true_top
@@ -1000,10 +1062,12 @@ fn get_true_top(pt: Point, map_datas: &[(Entity, MapChunkData, Point)], map_data
 
 /// Expands the changed range to include positions on the border of the change, and gets the intersection with aabb to ensure it is within the bounds of the map data's aabb
 fn get_aabb_change_in_range(change: Aabb, aabb: Aabb) -> Aabb {
-    let expand_aabb = Aabb::from_extents(change.get_min() - Point::new(1,1,1), change.get_max() + Point::new(1,1,1));
+    let expand_aabb = Aabb::from_extents(
+        change.get_min() - Point::new(1, 1, 1),
+        change.get_max() + Point::new(1, 1, 1),
+    );
 
     expand_aabb.get_intersection(aabb)
-
 }
 
 pub fn scale_from_origin(pt: Vector3, origin: Vector3, scale_amount: f32) -> Vector3 {
@@ -1011,66 +1075,70 @@ pub fn scale_from_origin(pt: Vector3, origin: Vector3, scale_amount: f32) -> Vec
     pt -= origin;
     pt *= scale_amount;
     pt + origin
-} 
+}
 
-pub fn get_open_sides(map_datas: &[(Entity, MapChunkData, Point)], map_data: &MapChunkData, point: Point, checked: &HashSet<Point>) -> HashSet<Point> {
+pub fn get_open_sides(
+    map_datas: &[(Entity, MapChunkData, Point)],
+    map_data: &MapChunkData,
+    point: Point,
+    checked: &HashSet<Point>,
+) -> HashSet<Point> {
     let chunk_max = map_data.octree.get_aabb().get_max();
     let chunk_min = map_data.octree.get_aabb().get_min();
-    
+
     let (tx, rx) = crossbeam_channel::unbounded::<Point>();
 
     // for dir in neighbor_dirs {
     NEIGHBOR_DIRS.par_iter().for_each_with(tx, |tx, dir| {
-
         let neighbor = point + *dir;
 
         if checked.contains(&neighbor) {
             // println!("Checked contains {:?}", neighbor);
-            return {}
+            return {};
         }
 
         if map_data.octree.query_point(neighbor).is_none() {
-
             match map_data.octree.get_aabb().contains_point(neighbor) {
                 false => {
-
                     let mut adj_dir = *dir;
 
                     if neighbor.x > chunk_max.x {
-                        adj_dir.x = 1;    
+                        adj_dir.x = 1;
                     } else if neighbor.x < chunk_min.x {
                         adj_dir.x = -1;
                     } else {
                         adj_dir.x = 0;
                     }
-                    
+
                     if neighbor.z > chunk_max.z {
                         adj_dir.z = 1;
                     } else if neighbor.z < chunk_min.z {
-                        adj_dir.z = -1; 
+                        adj_dir.z = -1;
                     } else {
                         adj_dir.z = 0;
                     }
 
                     let chunk_point_dir = map_data.get_chunk_point() + adj_dir;
 
-                    match map_datas.par_iter().find_first(|(_, _, pt)| *pt == chunk_point_dir) {
-                        Some((_, map_data, _)) => {
-                            
-                            match map_data.octree.query_point(neighbor) {
-                                Some(_) => return {},
-                                None => {
-                                    tx.send(*dir).unwrap();
-                                }
+                    match map_datas
+                        .par_iter()
+                        .find_first(|(_, _, pt)| *pt == chunk_point_dir)
+                    {
+                        Some((_, map_data, _)) => match map_data.octree.query_point(neighbor) {
+                            Some(_) => return {},
+                            None => {
+                                tx.send(*dir).unwrap();
                             }
-
                         },
-                        None => { tx.send(*dir).unwrap(); }
+                        None => {
+                            tx.send(*dir).unwrap();
+                        }
                     }
-                },
-                true => { tx.send(*dir).unwrap(); }
+                }
+                true => {
+                    tx.send(*dir).unwrap();
+                }
             }
-            
         }
     });
 
@@ -1080,14 +1148,15 @@ pub fn get_open_sides(map_datas: &[(Entity, MapChunkData, Point)], map_data: &Ma
 }
 
 fn is_a_subdivision(point_y: f32) -> bool {
-    (point_y >= START_REPEAT_ABOVE_HEIGHT && (point_y % REPEAT_AMOUNT_ABOVE - START_REPEAT_ABOVE_HEIGHT) % REPEAT_AMOUNT_ABOVE == 0.) 
+    (point_y >= START_REPEAT_ABOVE_HEIGHT
+        && (point_y % REPEAT_AMOUNT_ABOVE - START_REPEAT_ABOVE_HEIGHT) % REPEAT_AMOUNT_ABOVE == 0.)
         || (point_y <= START_REPEAT_BELOW_HEIGHT && point_y % REPEAT_AMOUNT_BELOW == 0.)
 }
 
 /// Get the direction the average of two points are from the center. For calculating the orthogonal direction of edges.
 fn get_direction_of_edge(pt1: Vector3, pt2: Vector3, center: Vector3) -> Point {
-    let right_dir = Vector3::new(1.,0.,0.);
-    let forward_dir = Vector3::new(0.,0.,1.);
+    let right_dir = Vector3::new(1., 0., 0.);
+    let forward_dir = Vector3::new(0., 0., 1.);
     let back_dir = -forward_dir;
     let left_dir = -right_dir;
 
@@ -1102,60 +1171,61 @@ fn get_direction_of_edge(pt1: Vector3, pt2: Vector3, center: Vector3) -> Point {
     }
 
     let average_dir = heading.normalize();
-    
-    //TODO: remove dependency on nightly
-    let dir = std::cmp::max_by(forward_dir, 
-        std::cmp::max_by(left_dir, 
-            std::cmp::max_by(back_dir, 
-                right_dir, |lh, rh|{
-                    lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
-                }), 
-            |lh, rh| {
-                lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
-            }), 
-        |lh, rh| {
-            lh.dot(average_dir).partial_cmp(&rh.dot(average_dir)).unwrap()
-        }
-    );
+
+    let dirs = vec![forward_dir, left_dir, back_dir];
+    let dir = dirs
+        .into_iter()
+        .max_by(|lh, rh| {
+            lh.dot(average_dir)
+                .partial_cmp(&rh.dot(average_dir))
+                .unwrap_or_else(|| std::cmp::Ordering::Less)
+        })
+        .unwrap_or_default();
 
     Point::new(dir.x as i32, dir.y as i32, dir.z as i32)
 }
 
 //allowed because this is just a function that gets called here
-#[allow(clippy::too_many_arguments)] 
-fn adjust_scaled_pts(open_sides: &HashSet<Point>, 
-    dir: Point, 
+#[allow(clippy::too_many_arguments)]
+fn adjust_scaled_pts(
+    open_sides: &HashSet<Point>,
+    dir: Point,
     right_dir: Point,
     left_dir: Point,
     right_diag: Point,
     left: Vector3,
     right: Vector3,
-    center: Vector3, 
-    left_rot: nalgebra::Rotation3::<f32>,
-    right_rot: nalgebra::Rotation3::<f32>,
-    scaled_left: Vector3, 
-    scaled_right: Vector3, 
+    center: Vector3,
+    left_rot: nalgebra::Rotation3<f32>,
+    right_rot: nalgebra::Rotation3<f32>,
+    scaled_left: Vector3,
+    scaled_right: Vector3,
 ) -> (Vector3, Vector3) {
-
     let mut scaled_left = scaled_left;
     let mut scaled_right = scaled_right;
 
-    if !open_sides.contains(&dir) && (open_sides.contains(&right_dir) || open_sides.contains(&right_diag)){
-
+    if !open_sides.contains(&dir)
+        && (open_sides.contains(&right_dir) || open_sides.contains(&right_diag))
+    {
         let middle = if right_dir.x.abs() > right_dir.z.abs() {
-            Vector3::new(right_dir.x as f32, right_dir.y as f32, right_dir.z as f32) * TILE_DIMENSIONS.x / 2.
+            Vector3::new(right_dir.x as f32, right_dir.y as f32, right_dir.z as f32)
+                * TILE_DIMENSIONS.x
+                / 2.
         } else {
-            Vector3::new(right_dir.x as f32, right_dir.y as f32, right_dir.z as f32) * TILE_DIMENSIONS.z / 2.
+            Vector3::new(right_dir.x as f32, right_dir.y as f32, right_dir.z as f32)
+                * TILE_DIMENSIONS.z
+                / 2.
         };
 
         let middle = left_rot * Vector3D::new(middle.x, middle.y, middle.z);
 
         let middle = Vector3::new(middle.x, middle.y, middle.z) + center;
 
-        scaled_right = scale_from_origin(right, middle,  1./(1.-BEVEL_SIZE));
-
-    } else if open_sides.contains(&dir) && !open_sides.contains(&right_dir) && (left-right).length() > 0.5 {
-
+        scaled_right = scale_from_origin(right, middle, 1. / (1. - BEVEL_SIZE));
+    } else if open_sides.contains(&dir)
+        && !open_sides.contains(&right_dir)
+        && (left - right).length() > 0.5
+    {
         let middle = if dir.x.abs() > dir.z.abs() {
             Vector3::new(dir.x as f32, dir.y as f32, dir.z as f32) * TILE_DIMENSIONS.x / 2.
         } else {
@@ -1166,12 +1236,11 @@ fn adjust_scaled_pts(open_sides: &HashSet<Point>,
 
         let middle = Vector3::new(middle.x, middle.y, middle.z) + center;
 
-        scaled_right = scale_from_origin(right, middle, 1./(1.-BEVEL_SIZE));
-
+        scaled_right = scale_from_origin(right, middle, 1. / (1. - BEVEL_SIZE));
     }
 
-    if open_sides.contains(&dir) && !open_sides.contains(&left_dir) && (left-right).length() > 0.5 {
-
+    if open_sides.contains(&dir) && !open_sides.contains(&left_dir) && (left - right).length() > 0.5
+    {
         let middle = if dir.x.abs() > dir.z.abs() {
             Vector3::new(dir.x as f32, dir.y as f32, dir.z as f32) * TILE_DIMENSIONS.x / 2.
         } else {
@@ -1182,33 +1251,39 @@ fn adjust_scaled_pts(open_sides: &HashSet<Point>,
 
         let middle = Vector3::new(middle.x, middle.y, middle.z) + center;
 
-        scaled_left = scale_from_origin(left, middle,  1./(1.-BEVEL_SIZE));
+        scaled_left = scale_from_origin(left, middle, 1. / (1. - BEVEL_SIZE));
     }
 
     (scaled_left, scaled_right)
 }
 
-fn define_verts_from_sides(sides: &HashSet<Point>, left: Vector3, right: Vector3, center: Vector3) -> Vec<Vector3> {
-    
+fn define_verts_from_sides(
+    sides: &HashSet<Point>,
+    left: Vector3,
+    right: Vector3,
+    center: Vector3,
+) -> Vec<Vector3> {
     let mut points: Vec<Vector3> = Vec::new();
-    
+
     let dir = get_direction_of_edge(right, left, center);
     let bevel = Vector3::new(dir.x as f32, dir.y as f32, dir.z as f32) * BEVEL_SIZE / 2.;
 
-    let right_dir = nalgebra::Rotation3::<f32>::from_axis_angle(&Vector3D::y_axis(), std::f32::consts::FRAC_PI_2) * Vector3D::new(dir.x as f32, dir.y as f32, dir.z as f32);
+    let right_dir = nalgebra::Rotation3::<f32>::from_axis_angle(
+        &Vector3D::y_axis(),
+        std::f32::consts::FRAC_PI_2,
+    ) * Vector3D::new(dir.x as f32, dir.y as f32, dir.z as f32);
     let right_dir = Point::new(right_dir.x as i32, right_dir.y as i32, right_dir.z as i32);
-    
+
     let left_dir = -right_dir;
 
     let mut scale_origin = center;
-    let mut scale_size = 1.-BEVEL_SIZE * 2.;
+    let mut scale_size = 1. - BEVEL_SIZE * 2.;
     let corner_scale = scale_size * 1.2;
 
     // Define top face points based on which sides are exposed or not.
     if sides.contains(&dir) {
-
         // godot_print!("prev_dir = {:?} dir = {:?} next_dir = {:?}", right_dir, dir, left_dir);
-        
+
         let mut adj: Vector3 = bevel;
         let mut corner: Option<Vector3> = None;
 
@@ -1216,18 +1291,15 @@ fn define_verts_from_sides(sides: &HashSet<Point>, left: Vector3, right: Vector3
             scale_size = 1.;
             scale_origin = (left + right) / 2.;
             adj = -bevel;
-
         } else if !sides.contains(&right_dir) {
             scale_origin = right;
-            scale_size = 1.-BEVEL_SIZE;
+            scale_size = 1. - BEVEL_SIZE;
             corner = Some(scale_from_origin(left, center, corner_scale));
             adj = -bevel;
-
         } else if !sides.contains(&left_dir) {
             scale_origin = left;
-            scale_size = 1.-BEVEL_SIZE;
+            scale_size = 1. - BEVEL_SIZE;
             adj = -bevel;
-
         } else {
             corner = Some(scale_from_origin(left, scale_origin, corner_scale));
         }
@@ -1239,47 +1311,58 @@ fn define_verts_from_sides(sides: &HashSet<Point>, left: Vector3, right: Vector3
         scaled_left += adj;
 
         match corner {
-            Some(corner) => {
-                points.extend(&[scaled_right, scaled_left, corner])
-            },
-            None => {
-                points.extend(&[scaled_right, scaled_left])
-            }
+            Some(corner) => points.extend(&[scaled_right, scaled_left, corner]),
+            None => points.extend(&[scaled_right, scaled_left]),
         }
-
     } else {
+        let right_diag = nalgebra::Rotation3::<f32>::from_axis_angle(
+            &Vector3D::y_axis(),
+            std::f32::consts::FRAC_PI_4,
+        ) * Vector3D::new(dir.x as f32, dir.y as f32, dir.z as f32);
+        let right_diag = Point::new(
+            right_diag.x.round() as i32,
+            right_diag.y.round() as i32,
+            right_diag.z.round() as i32,
+        );
 
-        let right_diag = nalgebra::Rotation3::<f32>::from_axis_angle(&Vector3D::y_axis(), std::f32::consts::FRAC_PI_4) * Vector3D::new(dir.x as f32, dir.y as f32, dir.z as f32);
-        let right_diag = Point::new(right_diag.x.round() as i32, right_diag.y.round() as i32, right_diag.z.round() as i32);
-
-        let left_diag = nalgebra::Rotation3::<f32>::from_axis_angle(&Vector3D::y_axis(), -std::f32::consts::FRAC_PI_4) * Vector3D::new(dir.x as f32, dir.y as f32, dir.z as f32);
-        let left_diag = Point::new(left_diag.x.round() as i32, left_diag.y.round() as i32, left_diag.z.round() as i32);
+        let left_diag = nalgebra::Rotation3::<f32>::from_axis_angle(
+            &Vector3D::y_axis(),
+            -std::f32::consts::FRAC_PI_4,
+        ) * Vector3D::new(dir.x as f32, dir.y as f32, dir.z as f32);
+        let left_diag = Point::new(
+            left_diag.x.round() as i32,
+            left_diag.y.round() as i32,
+            left_diag.z.round() as i32,
+        );
 
         let mut adj: Option<Vector3> = None;
 
         if !sides.contains(&left_dir) && !sides.contains(&right_dir) {
             if !sides.contains(&right_diag) && !sides.contains(&left_diag) {
                 scale_size = 1.;
-
             } else if !sides.contains(&left_diag) {
                 scale_origin = left;
-                scale_size = 1.-BEVEL_SIZE / 2.;                                    
+                scale_size = 1. - BEVEL_SIZE / 2.;
             } else {
                 scale_origin = (right + left) / 2.;
-                scale_size = 1.-BEVEL_SIZE;
+                scale_size = 1. - BEVEL_SIZE;
             }
         } else if !sides.contains(&left_dir) {
-            if !sides.contains(&left_diag){
+            if !sides.contains(&left_diag) {
                 scale_origin = left;
-                scale_size = 1.-BEVEL_SIZE / 2.;
+                scale_size = 1. - BEVEL_SIZE / 2.;
             } else {
                 scale_origin = left;
-                adj = Some(Vector3::new(right_dir.x as f32, right_dir.y as f32, right_dir.z as f32) * BEVEL_SIZE / 2.);
-                scale_size = 1.-BEVEL_SIZE;
+                adj = Some(
+                    Vector3::new(right_dir.x as f32, right_dir.y as f32, right_dir.z as f32)
+                        * BEVEL_SIZE
+                        / 2.,
+                );
+                scale_size = 1. - BEVEL_SIZE;
             }
         } else {
             scale_origin = (right + left) / 2.;
-            scale_size = 1.-BEVEL_SIZE;
+            scale_size = 1. - BEVEL_SIZE;
         }
 
         let mut scaled_right = scale_from_origin(right, scale_origin, scale_size);
@@ -1291,7 +1374,6 @@ fn define_verts_from_sides(sides: &HashSet<Point>, left: Vector3, right: Vector3
         }
 
         points.extend(&[scaled_right, scaled_left]);
-
     }
 
     points
@@ -1300,13 +1382,13 @@ fn define_verts_from_sides(sides: &HashSet<Point>, left: Vector3, right: Vector3
 //allowed because this is just a function that gets called here
 #[allow(clippy::too_many_arguments)]
 fn draw_walls(
-    points: &[Vector3], 
-    sides: &HashSet<Point>, 
-    center: Vector3, 
-    point: Point, 
-    world_point: Vector3D, 
-    bottom: f32, 
-    true_top: f32, 
+    points: &[Vector3],
+    sides: &HashSet<Point>,
+    center: Vector3,
+    point: Point,
+    world_point: Vector3D,
+    bottom: f32,
+    true_top: f32,
 ) -> VertexData {
     //define the vertices for the walls
     let border_points_len = points.len();
@@ -1332,222 +1414,271 @@ fn draw_walls(
     let (new_uv2_tx, new_uv2_rx) = crossbeam_channel::unbounded::<(usize, Vector2)>();
     let (new_idx_tx, new_idx_rx) = crossbeam_channel::unbounded::<(usize, i32)>();
 
-    points.par_iter().enumerate().for_each_with((new_pts_tx, new_norm_tx, new_uv_tx, new_uv2_tx, new_idx_tx), |(new_pts_tx, new_norm_tx, new_uv_tx, new_uv2_tx, new_idx_tx), (i, border_point)| {
-        let border_point = *border_point;
+    points.par_iter().enumerate().for_each_with(
+        (new_pts_tx, new_norm_tx, new_uv_tx, new_uv2_tx, new_idx_tx),
+        |(new_pts_tx, new_norm_tx, new_uv_tx, new_uv2_tx, new_idx_tx), (i, border_point)| {
+            let border_point = *border_point;
 
-        //get the direction
-        let next_i = (i+1) % border_points_len;
+            //get the direction
+            let next_i = (i + 1) % border_points_len;
 
-        let next_point = points.get(next_i).unwrap();
+            let next_point = points.get(next_i).unwrap();
 
-        let dir = get_direction_of_edge(border_point, *next_point, center);
+            let dir = get_direction_of_edge(border_point, *next_point, center);
 
-        let bottom_point = border_point - Vector3::new(0., height, 0.);
+            let bottom_point = border_point - Vector3::new(0., height, 0.);
 
-        let point_idx = i * 2;
-        {
-            //top
-            new_pts_tx.send((point_idx, border_point)).ok();
-
-            //bottom
-            new_pts_tx.send((point_idx + 1, bottom_point)).ok();
-        }
-
-        //define the uvs for the walls on every other iteration 
-        if i % 2 == 0 {
-
-            let uv_idx = i * 2;
-
-            let diff = *next_point - border_point;
-
-            let mut normal_origin = (*next_point + border_point) / 2.;
-            normal_origin.y = center.y;
-            normal_origin = (normal_origin - center).normalize();
-
-            let mut normal_origin_bp = normal_origin;
-            normal_origin_bp.y = border_point.y;
-            let mut normal_origin_bot = normal_origin;
-            normal_origin_bot.y = bottom_point.y;
-
+            let point_idx = i * 2;
             {
-                new_norm_tx.send((uv_idx, normal_origin.normalize())).ok();
-                new_norm_tx.send((uv_idx + 1, normal_origin.normalize())).ok();
+                //top
+                new_pts_tx.send((point_idx, border_point)).ok();
 
-                new_norm_tx.send((uv_idx + 2, normal_origin.normalize())).ok();
-                new_norm_tx.send((uv_idx + 3, normal_origin.normalize())).ok();
+                //bottom
+                new_pts_tx.send((point_idx + 1, bottom_point)).ok();
             }
 
-            let mut u = 1.;
-            let mut next_u = 1.;
+            //define the uvs for the walls on every other iteration
+            if i % 2 == 0 {
+                let uv_idx = i * 2;
 
-            if dir.z.abs() > 0 {
+                let diff = *next_point - border_point;
 
-                u = world_point.x * TILE_SIZE + (border_point.x - world_point.x).abs() * TILE_SIZE;
+                let mut normal_origin = (*next_point + border_point) / 2.;
+                normal_origin.y = center.y;
+                normal_origin = (normal_origin - center).normalize();
 
-                next_u = world_point.x * TILE_SIZE + (next_point.x - world_point.x).abs() * TILE_SIZE ;
+                let mut normal_origin_bp = normal_origin;
+                normal_origin_bp.y = border_point.y;
+                let mut normal_origin_bot = normal_origin;
+                normal_origin_bot.y = bottom_point.y;
 
-                if diff.x > 0. {
+                {
+                    new_norm_tx.send((uv_idx, normal_origin.normalize())).ok();
+                    new_norm_tx
+                        .send((uv_idx + 1, normal_origin.normalize()))
+                        .ok();
 
-                    u = -u;
-                    next_u = -next_u;
-
+                    new_norm_tx
+                        .send((uv_idx + 2, normal_origin.normalize()))
+                        .ok();
+                    new_norm_tx
+                        .send((uv_idx + 3, normal_origin.normalize()))
+                        .ok();
                 }
 
-            } else if dir.x.abs() > 0 {
-                u = world_point.z * TILE_SIZE + (border_point.z - world_point.z).abs() * TILE_SIZE;
+                let mut u = 1.;
+                let mut next_u = 1.;
 
-                next_u = world_point.z * TILE_SIZE + (next_point.z - world_point.z).abs() * TILE_SIZE ;
+                if dir.z.abs() > 0 {
+                    u = world_point.x * TILE_SIZE
+                        + (border_point.x - world_point.x).abs() * TILE_SIZE;
 
-                if diff.z > 0. {
-
-                    u = -u;
-                    next_u = -next_u;
-
-                }
-            }
-            
-            let mut vert_offset = if bottom < START_REPEAT_BELOW_HEIGHT  {
-                (bottom / REPEAT_AMOUNT_BELOW).floor() * REPEAT_AMOUNT_BELOW * TILE_SIZE
-            } else if bottom - START_REPEAT_ABOVE_HEIGHT >= START_REPEAT_BELOW_HEIGHT {
-                ((((bottom - START_REPEAT_ABOVE_HEIGHT) / REPEAT_AMOUNT_ABOVE).floor() * REPEAT_AMOUNT_ABOVE) - REPEAT_AMOUNT_BELOW) * TILE_SIZE
-            } else {
-                - REPEAT_AMOUNT_BELOW * TILE_SIZE
-            }; 
-
-            vert_offset -= WALL_VERTICAL_OFFSET * TILE_SIZE;
-
-            if true_top - bottom > 1.0 {
-                vert_offset += 1.0;
-            }
-
-            //define the uvs for the grass overhang textures
-            if map_coords_to_world(point).y + std::f32::EPSILON > true_top - 1. {
-
-                let (mut u, mut next_u) = if dir.z.abs() > 0 {
-
-                    let mut u = TILE_SIZE + (border_point.x - world_point.x).abs() * TILE_SIZE;
-
-                    let mut next_u = TILE_SIZE + (next_point.x - world_point.x).abs() * TILE_SIZE ;
+                    next_u = world_point.x * TILE_SIZE
+                        + (next_point.x - world_point.x).abs() * TILE_SIZE;
 
                     if diff.x > 0. {
                         u = -u;
                         next_u = -next_u;
                     }
-
-                    (u, next_u)
-
                 } else if dir.x.abs() > 0 {
-                    let mut u = TILE_SIZE + (border_point.z - world_point.z).abs() * TILE_SIZE;
+                    u = world_point.z * TILE_SIZE
+                        + (border_point.z - world_point.z).abs() * TILE_SIZE;
 
-                    let mut next_u = TILE_SIZE + (next_point.z - world_point.z).abs() * TILE_SIZE ;
+                    next_u = world_point.z * TILE_SIZE
+                        + (next_point.z - world_point.z).abs() * TILE_SIZE;
 
                     if diff.z > 0. {
                         u = -u;
                         next_u = -next_u;
                     }
+                }
 
-                    (u, next_u)
+                let mut vert_offset = if bottom < START_REPEAT_BELOW_HEIGHT {
+                    (bottom / REPEAT_AMOUNT_BELOW).floor() * REPEAT_AMOUNT_BELOW * TILE_SIZE
+                } else if bottom - START_REPEAT_ABOVE_HEIGHT >= START_REPEAT_BELOW_HEIGHT {
+                    ((((bottom - START_REPEAT_ABOVE_HEIGHT) / REPEAT_AMOUNT_ABOVE).floor()
+                        * REPEAT_AMOUNT_ABOVE)
+                        - REPEAT_AMOUNT_BELOW)
+                        * TILE_SIZE
                 } else {
-                    (u, next_u)
+                    -REPEAT_AMOUNT_BELOW * TILE_SIZE
                 };
 
-                if u < 0. {
-                    u = (1. - u) % 1.;
+                vert_offset -= WALL_VERTICAL_OFFSET * TILE_SIZE;
+
+                if true_top - bottom > 1.0 {
+                    vert_offset += 1.0;
                 }
 
-                if next_u < 0. {
-                    next_u = (1. - next_u) % 1.;
-                }
+                //define the uvs for the grass overhang textures
+                if map_coords_to_world(point).y + std::f32::EPSILON > true_top - 1. {
+                    let (mut u, mut next_u) = if dir.z.abs() > 0 {
+                        let mut u = TILE_SIZE + (border_point.x - world_point.x).abs() * TILE_SIZE;
 
-                let top_v = TILE_SIZE * (true_top - top);
-                let bottom_v = TILE_SIZE * (true_top - bottom);
+                        let mut next_u =
+                            TILE_SIZE + (next_point.x - world_point.x).abs() * TILE_SIZE;
 
-                new_uv2_tx.send((uv_idx, Vector2::new(u, top_v))).ok();
-                new_uv2_tx.send((uv_idx + 1, Vector2::new(u, bottom_v))).ok();
+                        if diff.x > 0. {
+                            u = -u;
+                            next_u = -next_u;
+                        }
 
-                new_uv2_tx.send((uv_idx + 2, Vector2::new(next_u, top_v))).ok();
-                new_uv2_tx.send((uv_idx + 3, Vector2::new(next_u, bottom_v))).ok();
+                        (u, next_u)
+                    } else if dir.x.abs() > 0 {
+                        let mut u = TILE_SIZE + (border_point.z - world_point.z).abs() * TILE_SIZE;
 
-            } else {
-                new_uv2_tx.send((uv_idx, Vector2::default())).ok();
-                new_uv2_tx.send((uv_idx + 1, Vector2::default())).ok();
+                        let mut next_u =
+                            TILE_SIZE + (next_point.z - world_point.z).abs() * TILE_SIZE;
 
-                new_uv2_tx.send((uv_idx + 2, Vector2::default())).ok();
-                new_uv2_tx.send((uv_idx + 3, Vector2::default())).ok();
-            }
+                        if diff.z > 0. {
+                            u = -u;
+                            next_u = -next_u;
+                        }
 
-            //bottom of face
-            new_uv_tx.send((uv_idx, Vector2::new(u,-1.-height * TILE_SIZE - bottom * TILE_SIZE + vert_offset))).ok();
-            //top of face
-            new_uv_tx.send((uv_idx + 1, Vector2::new(u,-1.-bottom * TILE_SIZE + vert_offset))).ok();
-
-            //bottom of face
-            new_uv_tx.send((uv_idx + 2, Vector2::new(next_u,-1.-height * TILE_SIZE - bottom * TILE_SIZE + vert_offset))).ok();
-            //top of face
-            new_uv_tx.send((uv_idx + 3, Vector2::new(next_u,-1.-bottom * TILE_SIZE + vert_offset))).ok();
-
-            //if there are only 2 border points, only draw from the first index to avoid drawing both sides since the index will loop around
-            if border_points_len > 2 || i < border_points_len-1 {
-                //only add indices for points that aren't overlapping
-                if (*next_point - border_point).length() > std::f32::EPSILON {
-
-                    if sides.contains(&dir) {
-
-                        let j = point_idx as i32;
-                        let len = indices_len as i32;
-
-                        let indices_idx = i * 6;
-
-                        new_idx_tx.send((indices_idx, j % len)).ok();
-                        new_idx_tx.send((indices_idx + 1, (j+1) % len)).ok();
-                        new_idx_tx.send((indices_idx + 2, (j+2) % len)).ok();
-
-                        new_idx_tx.send((indices_idx + 3, (j+2) % len)).ok();
-                        new_idx_tx.send((indices_idx + 4, (j+1) % len)).ok();
-                        new_idx_tx.send((indices_idx + 5, (j+3) % len)).ok();
-
+                        (u, next_u)
                     } else {
-                        // godot_print!("{:?} is not drawing {:?}", point, dir);
+                        (u, next_u)
+                    };
+
+                    if u < 0. {
+                        u = (1. - u) % 1.;
                     }
+
+                    if next_u < 0. {
+                        next_u = (1. - next_u) % 1.;
+                    }
+
+                    let top_v = TILE_SIZE * (true_top - top);
+                    let bottom_v = TILE_SIZE * (true_top - bottom);
+
+                    new_uv2_tx.send((uv_idx, Vector2::new(u, top_v))).ok();
+                    new_uv2_tx
+                        .send((uv_idx + 1, Vector2::new(u, bottom_v)))
+                        .ok();
+
+                    new_uv2_tx
+                        .send((uv_idx + 2, Vector2::new(next_u, top_v)))
+                        .ok();
+                    new_uv2_tx
+                        .send((uv_idx + 3, Vector2::new(next_u, bottom_v)))
+                        .ok();
                 } else {
-                    // godot_print!("Skipped some points because they were too close");
+                    new_uv2_tx.send((uv_idx, Vector2::default())).ok();
+                    new_uv2_tx.send((uv_idx + 1, Vector2::default())).ok();
+
+                    new_uv2_tx.send((uv_idx + 2, Vector2::default())).ok();
+                    new_uv2_tx.send((uv_idx + 3, Vector2::default())).ok();
+                }
+
+                //bottom of face
+                new_uv_tx
+                    .send((
+                        uv_idx,
+                        Vector2::new(
+                            u,
+                            -1. - height * TILE_SIZE - bottom * TILE_SIZE + vert_offset,
+                        ),
+                    ))
+                    .ok();
+                //top of face
+                new_uv_tx
+                    .send((
+                        uv_idx + 1,
+                        Vector2::new(u, -1. - bottom * TILE_SIZE + vert_offset),
+                    ))
+                    .ok();
+
+                //bottom of face
+                new_uv_tx
+                    .send((
+                        uv_idx + 2,
+                        Vector2::new(
+                            next_u,
+                            -1. - height * TILE_SIZE - bottom * TILE_SIZE + vert_offset,
+                        ),
+                    ))
+                    .ok();
+                //top of face
+                new_uv_tx
+                    .send((
+                        uv_idx + 3,
+                        Vector2::new(next_u, -1. - bottom * TILE_SIZE + vert_offset),
+                    ))
+                    .ok();
+
+                //if there are only 2 border points, only draw from the first index to avoid drawing both sides since the index will loop around
+                if border_points_len > 2 || i < border_points_len - 1 {
+                    //only add indices for points that aren't overlapping
+                    if (*next_point - border_point).length() > std::f32::EPSILON {
+                        if sides.contains(&dir) {
+                            let j = point_idx as i32;
+                            let len = indices_len as i32;
+
+                            let indices_idx = i * 6;
+
+                            new_idx_tx.send((indices_idx, j % len)).ok();
+                            new_idx_tx.send((indices_idx + 1, (j + 1) % len)).ok();
+                            new_idx_tx.send((indices_idx + 2, (j + 2) % len)).ok();
+
+                            new_idx_tx.send((indices_idx + 3, (j + 2) % len)).ok();
+                            new_idx_tx.send((indices_idx + 4, (j + 1) % len)).ok();
+                            new_idx_tx.send((indices_idx + 5, (j + 3) % len)).ok();
+                        } else {
+                            // godot_print!("{:?} is not drawing {:?}", point, dir);
+                        }
+                    } else {
+                        // godot_print!("Skipped some points because they were too close");
+                    }
                 }
             }
-        } 
-    });
+        },
+    );
 
     let mut new_pts = new_pts_rx.into_iter().collect::<Vec<(usize, Vector3)>>();
     new_pts.par_sort_by(|(a, _), (b, _)| a.cmp(&b));
-    new_pts.into_par_iter().map(|(_, v)| v).collect_into_vec(&mut vertex_data.verts);
+    new_pts
+        .into_par_iter()
+        .map(|(_, v)| v)
+        .collect_into_vec(&mut vertex_data.verts);
 
     let mut new_normals = new_norm_rx.into_iter().collect::<Vec<(usize, Vector3)>>();
     new_normals.par_sort_by(|(a, _), (b, _)| a.cmp(&b));
-    new_normals.into_par_iter().map(|(_, n)| n).collect_into_vec(&mut vertex_data.normals);
+    new_normals
+        .into_par_iter()
+        .map(|(_, n)| n)
+        .collect_into_vec(&mut vertex_data.normals);
 
     let mut new_uvs = new_uv_rx.into_iter().collect::<Vec<(usize, Vector2)>>();
     new_uvs.par_sort_by(|(a, _), (b, _)| a.cmp(&b));
-    new_uvs.into_par_iter().map(|(_, u)| u).collect_into_vec(&mut vertex_data.uvs);
+    new_uvs
+        .into_par_iter()
+        .map(|(_, u)| u)
+        .collect_into_vec(&mut vertex_data.uvs);
 
     let mut new_uv2s = new_uv2_rx.into_iter().collect::<Vec<(usize, Vector2)>>();
     new_uv2s.par_sort_by(|(a, _), (b, _)| a.cmp(&b));
-    new_uv2s.into_par_iter().map(|(_, u)| u).collect_into_vec(&mut vertex_data.uv2s);
+    new_uv2s
+        .into_par_iter()
+        .map(|(_, u)| u)
+        .collect_into_vec(&mut vertex_data.uv2s);
 
     let mut new_indices = new_idx_rx.into_iter().collect::<Vec<(usize, i32)>>();
     new_indices.par_sort_by(|(a, _), (b, _)| a.cmp(&b));
-    new_indices.into_par_iter().map(|(_, i)| i).collect_into_vec(&mut vertex_data.indices);
+    new_indices
+        .into_par_iter()
+        .map(|(_, i)| i)
+        .collect_into_vec(&mut vertex_data.indices);
 
     vertex_data
 }
 
 pub struct MapMeshData {
-    cols: Vec<VertexData>
+    cols: Vec<VertexData>,
 }
 
 impl MapMeshData {
-    pub fn new(cols: Vec<VertexData>) -> Self{
-        Self {
-            cols
-        }
+    pub fn new(cols: Vec<VertexData>) -> Self {
+        Self { cols }
     }
 }
 
@@ -1567,7 +1698,7 @@ impl Default for VertexData {
             normals: Default::default(),
             uvs: Default::default(),
             uv2s: Default::default(),
-            indices: Default::default()
+            indices: Default::default(),
         }
     }
 }
@@ -1585,6 +1716,5 @@ impl VertexData {
         self.uvs.par_extend(other.uvs.into_par_iter());
         self.uv2s.par_extend(other.uv2s.into_par_iter());
         self.indices.par_extend(other.indices.into_par_iter());
-
     }
 }
