@@ -12,7 +12,7 @@ gdnative = "0.9"
 lazy_static = "1.4"
 legion = "0.4"
 nalgebra = "0.25"
-octree = { git = "https://github.com/lyonbeckers/rs-octree", rev = "9bc2e7b" }
+octree = { git = "https://github.com/lyonbeckers/rs-octree", rev = "3f32039" }
 parking_lot = "0.11"
 rayon = "1.5"
 

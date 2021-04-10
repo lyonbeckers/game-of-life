@@ -116,9 +116,7 @@ impl VoxelMesh {
             });
 
             let mut octree = Octree::new(Aabb::from_extents(min, max), octree::DEFAULT_MAX);
-            tiles.into_iter().for_each(|tile_data| {
-                octree.insert(tile_data).ok();
-            });
+            octree.insert_elements(tiles).ok();
 
             map.change(&mut self.world, octree);
         }

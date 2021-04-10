@@ -1172,7 +1172,7 @@ fn get_direction_of_edge(pt1: Vector3, pt2: Vector3, center: Vector3) -> Point {
 
     let average_dir = heading.normalize();
 
-    let dirs = vec![forward_dir, left_dir, back_dir];
+    let dirs = vec![back_dir, right_dir, left_dir, forward_dir];
     let dir = dirs
         .into_iter()
         .max_by(|lh, rh| {
