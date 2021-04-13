@@ -7,7 +7,6 @@ use crate::{Aabb, Octree, Point};
 
 use crate::custom_mesh;
 use legion::*;
-use rayon::prelude::*;
 use tile_data::TileData;
 
 #[cfg(not(test))]

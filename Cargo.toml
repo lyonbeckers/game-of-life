@@ -14,6 +14,7 @@ legion = "0.4"
 nalgebra = "0.25"
 octree = { git = "https://github.com/lyonbeckers/rs-octree", rev = "3f32039" }
 parking_lot = "0.11"
+rand = "0.8"
 rayon = "1.5"
 
 [lib]
