@@ -1,6 +1,6 @@
-mod custom_mesh;
-mod node;
-mod voxel;
+pub mod custom_mesh;
+pub mod node;
+pub mod voxel;
 
 use gdnative::prelude::*;
 use legion::*;
@@ -15,8 +15,8 @@ pub type Vector3D = nalgebra::Vector3<f32>;
 #[derive(NativeClass)]
 #[inherit(Node)]
 pub struct VoxelMesh {
-    world: World,
-    resources: Resources,
+    pub world: World,
+    pub resources: Resources,
     schedule: Schedule,
     #[property(path = "chunk_dimensions/width", default = 10)]
     width: i32,
@@ -135,5 +135,17 @@ impl VoxelMesh {
 
             map.change(&mut self.world, octree);
         }
+    }
+}
+
+pub struct VoxelMeshRef<'a>(pub RefInstance<'a, VoxelMesh, Shared>);
+
+impl<'a> FromVariant for VoxelMeshRef<'a> {
+    fn from_variant(variant: &Variant) -> Result<Self, FromVariantError> {
+        variant
+            .try_to_object::<Node>()
+            .and_then(|node| unsafe { node.assume_safe() }.cast_instance::<VoxelMesh>())
+            .map(|inst| VoxelMeshRef(inst))
+            .ok_or_else(|| FromVariantError::Unspecified)
     }
 }

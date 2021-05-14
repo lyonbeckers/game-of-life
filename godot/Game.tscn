@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=2]
+[gd_scene load_steps=8 format=2]
 
 [ext_resource path="res://VoxelMesh.gdns" type="Script" id=1]
 [ext_resource path="res://game_of_life_controller.gd" type="Script" id=2]
@@ -6,109 +6,6 @@
 [ext_resource path="res://GameOfLife.gdns" type="Script" id=4]
 
 [sub_resource type="GDScript" id=1]
-script/source = "extends Spatial
-
-var position = Vector3(0,0,0)
-var move_left = false;
-var move_right = false;
-var move_forward = false;
-var move_back = false;
-var trigger_pressed = false;
-var left_repeater = 0.0;
-var right_repeater = 0.0;
-var forward_repeater = 0.0;
-var back_repeater = 0.0;
-
-const SPEED = 0.20;
-
-func _ready():
-	pass
-	
-func _process(delta):
-	if move_back:
-		back_repeater += delta;
-	if move_forward:
-		forward_repeater += delta;
-	if move_left:
-		left_repeater += delta;
-	if move_right:
-		right_repeater += delta;
-		
-	if back_repeater > SPEED:
-		back_repeater = 0.0;
-		position.z += 1;
-	if forward_repeater > SPEED:
-		forward_repeater = 0.0;
-		position.z -= 1;
-	if left_repeater > SPEED:
-		left_repeater = 0.0;
-		position.x -= 1;
-	if right_repeater > SPEED:
-		right_repeater = 0.0;
-		position.x += 1;
-		
-	position.x = max(position.x, 0)
-	position.z = max(position.z, 0)
-	position.x = min(position.x, $game_of_life_controller/game_of_life.get(\"map/width\") - 1)
-	position.z = min(position.z, $game_of_life_controller/game_of_life.get(\"map/height\") - 1)
-	
-	var focal_point = position + Vector3(0.5, 1.0, 0.5)
-	$pickaxe.transform.origin = focal_point + Vector3(SPEED, 0.0, -SPEED)
-	$camera_controller.heading = focal_point
-	
-func _input(event):
-	if event.is_action_pressed(\"move_left\"):
-		move_left = true;
-		position.x -= 1;
-	if event.is_action_pressed(\"move_right\"):
-		move_right = true;
-		position.x += 1;
-	if event.is_action_pressed(\"move_forward\"):
-		move_forward = true;
-		position.z -= 1;
-	if event.is_action_pressed(\"move_back\"):
-		move_back = true;
-		position.z += 1;
-		
-	if event.is_action_released(\"move_left\"):
-		move_left = false;
-		left_repeater = 0.0;
-	if event.is_action_released(\"move_right\"):
-		move_right = false;
-		right_repeater = 0.0;
-	if event.is_action_released(\"move_forward\"):
-		move_forward = false;
-		forward_repeater = 0.0;
-	if event.is_action_released(\"move_back\"):
-		move_back = false;
-		back_repeater = 0.0;
-	
-	if event.is_action_pressed(\"action_trigger\"):
-		trigger_pressed = true;
-		dig()
-		
-	if event.is_action_released(\"action_trigger\"):
-		trigger_pressed = false;
-		
-func dig():
-	var neighbors = [
-			position + Vector3(1,0,0),
-			position + Vector3(-1,0,0),
-			position + Vector3(0,0,1),
-			position + Vector3(0,0,-1),
-		]
-	# var can_dig = $game_of_life_controller.tile_nutrients.has(position);
-		
-	# if !can_dig: return
-		
-	# can_dig = !$game_of_life_controller.tile_nutrients.has_all(neighbors)
-					
-	# if !can_dig: return
-		
-	$game_of_life_controller/game_of_life.remove_point($game_of_life_controller/voxel_mesh, position.x as int, position.y as int, position.z as int)
-"
-
-[sub_resource type="GDScript" id=2]
 script/source = "extends Spatial
 
 var heading = Vector3(0,0,0)
@@ -122,8 +19,49 @@ func _process(delta):
 	$camera.look_at(transform.origin, Vector3.UP)
 "
 
+[sub_resource type="GDScript" id=2]
+script/source = "extends Label
+
+
+# Declare member variables here. Examples:
+# var a = 2
+# var b = \"text\"
+
+
+# Called when the node enters the scene tree for the first time.
+func _ready():
+	pass # Replace with function body.
+
+
+# Called every frame. 'delta' is the elapsed time since the previous frame.
+func _process(_delta):
+	text = \"fps: \" + str(Engine.get_frames_per_second())
+"
+
+[sub_resource type="GDScript" id=3]
+script/source = "extends Label
+
+
+# Declare member variables here. Examples:
+# var a = 2
+# var b = \"text\"
+
+
+# Called when the node enters the scene tree for the first time.
+func _ready():
+	pass # Replace with function body.
+
+
+# Called every frame. 'delta' is the elapsed time since the previous frame.
+func _process(_delta):
+	var gol_controller = owner.get_node(\"game_of_life_controller\")
+	var gol = gol_controller.get_node(\"game_of_life\")
+	var vm = gol_controller.get_node(\"voxel_mesh\")
+	var pos = gol_controller.position
+	text = \"chunk: \" + str(gol.map_chunk_at_point(vm, pos.x as int, pos.y as int, pos.z as int))
+"
+
 [node name="Spatial" type="Spatial"]
-script = SubResource( 1 )
 
 [node name="game_of_life_controller" type="Node" parent="."]
 script = ExtResource( 2 )
@@ -134,11 +72,38 @@ script = ExtResource( 1 )
 [node name="game_of_life" type="Node" parent="game_of_life_controller"]
 script = ExtResource( 4 )
 
-[node name="pickaxe" parent="." instance=ExtResource( 3 )]
+[node name="pickaxe" parent="game_of_life_controller" instance=ExtResource( 3 )]
 transform = Transform( 2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 1, 0 )
 
-[node name="camera_controller" type="Spatial" parent="."]
+[node name="camera_controller" type="Spatial" parent="game_of_life_controller"]
+script = SubResource( 1 )
+
+[node name="camera" type="Camera" parent="game_of_life_controller/camera_controller"]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 2 )
+
+[node name="Control" type="Control" parent="."]
+margin_right = 40.0
+margin_bottom = 40.0
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="debug_labels" type="VBoxContainer" parent="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="fps" type="Label" parent="Control/debug_labels"]
+margin_right = 40.0
+margin_bottom = 14.0
+text = "Test"
 script = SubResource( 2 )
 
-[node name="camera" type="Camera" parent="camera_controller"]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 2 )
+[node name="chunk" type="Label" parent="Control/debug_labels"]
+margin_top = 18.0
+margin_right = 40.0
+margin_bottom = 32.0
+text = "Test"
+script = SubResource( 3 )

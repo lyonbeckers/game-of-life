@@ -1,9 +1,10 @@
 use gdnative::prelude::*;
+use legion::*;
 use octree::PointData;
 use rand::Rng;
 use rayon::prelude::*;
 use std::collections::HashMap;
-use voxel_mesh::{Point, TileData, VoxelMesh};
+use voxel_mesh::{node::NodeRef, voxel::MapChunkData, Point, TileData, VoxelMesh, VoxelMeshRef};
 
 #[derive(NativeClass)]
 #[inherit(Node)]
@@ -135,13 +136,55 @@ impl GameOfLife {
 
         let tiles = td_rx.into_iter().collect::<Vec<TileData>>();
 
-        voxel_mesh
-            .try_to_object::<Node>()
-            .and_then(|node| unsafe { node.assume_safe() }.cast_instance::<VoxelMesh>())
+        VoxelMeshRef::from_variant(&voxel_mesh)
+            .ok()
             .and_then(|voxel_mesh| {
                 voxel_mesh
+                    .0
                     .map_mut(|voxel_mesh, _| voxel_mesh.insert_points_internal(tiles))
                     .ok()
             });
+    }
+
+    #[export]
+    fn nutrients_at_point(&self, _: &Node, x: i32, y: i32, z: i32) -> i32 {
+        *self.tile_nutrients.get(&Point::new(x, y, z)).unwrap_or(&-1)
+    }
+
+    #[export]
+    fn map_chunk_at_point(
+        &self,
+        _: &Node,
+        voxel_mesh: Variant,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> (Vector3, GodotString) {
+        VoxelMeshRef::from_variant(&voxel_mesh)
+            .ok()
+            .and_then(|voxel_mesh| {
+                voxel_mesh
+                    .0
+                    .map_mut(|voxel_mesh, _| {
+                        let mut query = <(Read<NodeRef>, Read<MapChunkData>)>::query();
+                        query
+                            .iter(&mut voxel_mesh.world)
+                            .find(|(_, map_chunk)| {
+                                map_chunk
+                                    .octree
+                                    .get_aabb()
+                                    .contains_point(Point::new(x, y, z))
+                            })
+                            .map(|(node_ref, map_chunk)| {
+                                let pt = map_chunk.get_chunk_point();
+                                let name = unsafe { node_ref.val().assume_safe() }.name();
+
+                                (Vector3::new(pt.x as f32, pt.y as f32, pt.z as f32), name)
+                            })
+                    })
+                    .ok()
+            })
+            .flatten()
+            .unwrap_or_default()
     }
 }
