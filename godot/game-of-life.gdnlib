@@ -8,7 +8,9 @@ reloadable=true
 [entry]
 
 Windows.64="res://target/x86_64-pc-windows_gnu/release/game_of_life.dll"
+X11.64="res://../native/target/release/libgame_of_life.so"
 
 [dependencies]
 
 Windows.64=[  ]
+X11.64=[  ]
