@@ -3,7 +3,7 @@ pub mod tile_data;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{Aabb, Octree, Point};
+use crate::{custom_mesh::RequiresManualChange, Aabb, Octree, Point};
 
 use crate::custom_mesh;
 use legion::*;
@@ -11,6 +11,8 @@ use octree::PointData;
 use tile_data::TileData;
 
 use crate::custom_mesh::MeshData;
+
+use self::mesh::MapMeshData;
 
 pub const TILE_DIMENSIONS: TileDimensions = TileDimensions {
     x: 1.0,
@@ -117,14 +119,14 @@ impl Map {
                     .iter(world)
                     .find(|(_, _, chunk_pt)| **chunk_pt == pt)
                 {
-                    println!("Map chunk exists already");
+                    tracing::debug!("Map chunk exists already");
                     entities.insert(*entity, map_chunk.clone());
                     exists = true;
                 }
 
                 if !exists {
-                    println!("Creating a new map chunk at {:?}", pt);
-
+                    tracing::debug!("Creating a new map chunk at {:?}", pt);
+                    //TODO: user insert_mapchunks_with_octrees
                     let (entity, map_data) = self.insert_mapchunk_with_octree(
                         &Octree::new(
                             Aabb::new(
@@ -286,7 +288,82 @@ impl Map {
         results
     }
 
-    /// Inserts a new mapchunk with the octree data into world
+    pub fn insert_mapchunks_with_octrees(
+        self,
+        octrees: &[Octree],
+        world: &mut World,
+        changed: bool,
+    ) -> Vec<(Entity, MapChunkData)> {
+        if changed {
+            let (components, map_chunks): (Vec<_>, Vec<_>) = octrees
+                .into_iter()
+                .map(|octree| {
+                    let map_data = MapChunkData {
+                        octree: octree.clone(),
+                    };
+                    let chunk_pt = map_data.get_chunk_point();
+                    let area = self.chunk_dimensions.x * self.chunk_dimensions.z;
+
+                    (
+                        (
+                            ManuallyChange {
+                                ranges: vec![ChangeType::Direct(octree.get_aabb())],
+                            },
+                            chunk_pt,
+                            map_data.clone(),
+                            MeshData::new(),
+                            MapMeshData::new(
+                                (0..area).map(|_| mesh::VertexData::default()).collect(),
+                            ),
+                            RequiresManualChange {},
+                        ),
+                        map_data,
+                    )
+                })
+                .unzip();
+
+            let entities = world.extend(components);
+            entities
+                .into_iter()
+                .copied()
+                .zip(map_chunks.into_iter())
+                .collect()
+        } else {
+            let (components, map_chunks): (Vec<_>, Vec<_>) = octrees
+                .into_iter()
+                .map(|octree| {
+                    let map_data = MapChunkData {
+                        octree: octree.clone(),
+                    };
+                    let chunk_pt = map_data.get_chunk_point();
+                    let area = self.chunk_dimensions.x * self.chunk_dimensions.z;
+
+                    (
+                        (
+                            chunk_pt,
+                            map_data.clone(),
+                            MeshData::new(),
+                            mesh::MapMeshData::new(
+                                (0..area).map(|_| mesh::VertexData::default()).collect(),
+                            ),
+                            custom_mesh::RequiresManualChange {},
+                        ),
+                        map_data,
+                    )
+                })
+                .unzip();
+
+            let entities = world.extend(components);
+            entities
+                .into_iter()
+                .copied()
+                .zip(map_chunks.into_iter())
+                .collect()
+        }
+    }
+
+    /// Inserts a new mapchunk with the octree data into world. Prefer to use
+    /// insert_mapchunks_with_octrees if you can
     pub fn insert_mapchunk_with_octree(
         self,
         octree: &Octree,
