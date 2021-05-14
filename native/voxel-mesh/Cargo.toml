@@ -15,5 +15,6 @@ nalgebra = "0.25"
 octree = { git = "https://github.com/lyonbeckers/rs-octree", rev = "c0a31df" }
 parking_lot = "0.11"
 rayon = "1.5"
+tracing = "0.1"
 
 

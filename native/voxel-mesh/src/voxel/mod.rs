@@ -10,7 +10,6 @@ use legion::*;
 use octree::PointData;
 use tile_data::TileData;
 
-#[cfg(not(test))]
 use crate::custom_mesh::MeshData;
 
 pub const TILE_DIMENSIONS: TileDimensions = TileDimensions {
@@ -157,7 +156,7 @@ impl Map {
             let map_set = map_query_range.into_iter().collect::<HashSet<TileData>>();
 
             if set.symmetric_difference(&map_set).count() == 0 {
-                println!("Set and map_set were symmetrically the same");
+                tracing::debug!("Set and map_set were symmetrically the same");
                 continue;
             }
 
@@ -168,9 +167,9 @@ impl Map {
             });
 
             //Add any data that is in set but not map_set
-            let difference = set.difference(&map_set);
-            for item in difference {
-                map_data.octree.insert(*item).unwrap();
+            let difference = set.difference(&map_set).copied().collect::<Vec<TileData>>();
+            if !difference.is_empty() {
+                map_data.octree.insert_elements(difference).unwrap();
             }
 
             // And the range of change to the ManuallyChange component if it exists, otherwise, make it exist
@@ -310,7 +309,6 @@ impl Map {
                     },
                     chunk_pt,
                     map_data.clone(),
-                    #[cfg(not(test))]
                     MeshData::new(),
                     mesh::MapMeshData::new(
                         (0..area).map(|_| mesh::VertexData::default()).collect(),
@@ -324,7 +322,6 @@ impl Map {
                 world.push((
                     chunk_pt,
                     map_data.clone(),
-                    #[cfg(not(test))]
                     MeshData::new(),
                     mesh::MapMeshData::new(
                         (0..area).map(|_| mesh::VertexData::default()).collect(),
