@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=2]
+[gd_scene load_steps=10 format=2]
 
 [ext_resource path="res://VoxelMesh.gdns" type="Script" id=1]
 [ext_resource path="res://game_of_life_controller.gd" type="Script" id=2]
@@ -38,6 +38,25 @@ func _process(_delta):
 	text = \"fps: \" + str(Engine.get_frames_per_second())
 "
 
+[sub_resource type="GDScript" id=4]
+script/source = "extends Label
+
+
+# Declare member variables here. Examples:
+# var a = 2
+# var b = \"text\"
+
+
+# Called when the node enters the scene tree for the first time.
+func _ready():
+	pass # Replace with function body.
+
+
+# Called every frame. 'delta' is the elapsed time since the previous frame.
+func _process(_delta):
+	text = str(owner.get_node(\"game_of_life_controller\").get(\"position\"))
+"
+
 [sub_resource type="GDScript" id=3]
 script/source = "extends Label
 
@@ -59,6 +78,28 @@ func _process(_delta):
 	var vm = gol_controller.get_node(\"voxel_mesh\")
 	var pos = gol_controller.position
 	text = \"chunk: \" + str(gol.map_chunk_at_point(vm, pos.x as int, pos.y as int, pos.z as int))
+"
+
+[sub_resource type="GDScript" id=5]
+script/source = "extends Label
+
+
+# Declare member variables here. Examples:
+# var a = 2
+# var b = \"text\"
+
+
+# Called when the node enters the scene tree for the first time.
+func _ready():
+	pass # Replace with function body.
+
+
+# Called every frame. 'delta' is the elapsed time since the previous frame.
+func _process(_delta):
+	var gol_controller = owner.get_node(\"game_of_life_controller\")
+	var gol = gol_controller.get_node(\"game_of_life\")
+	var pos = gol_controller.position
+	text = str(gol.nutrients_at_point(pos.x as int, pos.y as int, pos.z as int))
 "
 
 [node name="Spatial" type="Spatial"]
@@ -101,9 +142,23 @@ margin_bottom = 14.0
 text = "Test"
 script = SubResource( 2 )
 
-[node name="chunk" type="Label" parent="Control/debug_labels"]
+[node name="position" type="Label" parent="Control/debug_labels"]
 margin_top = 18.0
 margin_right = 40.0
 margin_bottom = 32.0
 text = "Test"
+script = SubResource( 4 )
+
+[node name="chunk" type="Label" parent="Control/debug_labels"]
+margin_top = 36.0
+margin_right = 40.0
+margin_bottom = 50.0
+text = "Test"
 script = SubResource( 3 )
+
+[node name="nutrients" type="Label" parent="Control/debug_labels"]
+margin_top = 54.0
+margin_right = 40.0
+margin_bottom = 68.0
+text = "Test"
+script = SubResource( 5 )
