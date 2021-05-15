@@ -107,45 +107,42 @@ impl Map {
 
         let aabb = octree.get_aabb();
 
-        self.range_sliced_to_chunks(aabb)
+        let mut map_chunk_exists_query = <(Entity, Read<MapChunkData>, Read<Point>)>::query();
+        let existing_chunks = map_chunk_exists_query
+            .iter(world)
+            .map(|(e, m, p)| (*e, (*m).clone(), (*p).clone()))
+            .collect::<Vec<(Entity, MapChunkData, Point)>>();
+        let (existing, new): (Vec<_>, Vec<_>) = self
+            .range_sliced_to_chunks(aabb)
             .into_iter()
-            .for_each(|(pt, _)| {
-                let mut map_chunk_exists_query =
-                    <(Entity, Read<MapChunkData>, Read<Point>)>::query();
+            .partition(|(pt, _)| existing_chunks.iter().any(|(_, _, p)| pt == p));
 
-                let mut exists = false;
-
-                if let Some((entity, map_chunk, _)) = map_chunk_exists_query
-                    .iter(world)
-                    .find(|(_, _, chunk_pt)| **chunk_pt == pt)
-                {
-                    tracing::debug!("Map chunk exists already");
-                    entities.insert(*entity, map_chunk.clone());
-                    exists = true;
-                }
-
-                if !exists {
-                    tracing::debug!("Creating a new map chunk at {:?}", pt);
-                    //TODO: user insert_mapchunks_with_octrees
-                    let (entity, map_data) = self.insert_mapchunk_with_octree(
-                        &Octree::new(
-                            Aabb::new(
-                                Point::new(
-                                    pt.x * self.chunk_dimensions.x + self.chunk_dimensions.x / 2,
-                                    pt.y * self.chunk_dimensions.y + self.chunk_dimensions.y / 2,
-                                    pt.z * self.chunk_dimensions.z + self.chunk_dimensions.z / 2,
-                                ),
-                                self.chunk_dimensions,
-                            ),
-                            octree::DEFAULT_MAX,
-                        ),
-                        world,
-                        false,
-                    );
-
-                    entities.insert(entity, map_data);
-                }
+        existing_chunks
+            .into_iter()
+            .filter(|(_, _, pt)| existing.iter().any(|(p, _)| pt == p))
+            .for_each(|(entity, map_chunk, chunk_pt)| {
+                tracing::debug!(target: "chunk exists", chunk_pt = ?chunk_pt);
+                entities.insert(entity, map_chunk.clone());
             });
+
+        let octrees = new
+            .iter()
+            .map(|(pt, _)| {
+                Octree::new(
+                    Aabb::new(
+                        Point::new(
+                            pt.x * self.chunk_dimensions.x + self.chunk_dimensions.x / 2,
+                            pt.y * self.chunk_dimensions.y + self.chunk_dimensions.y / 2,
+                            pt.z * self.chunk_dimensions.z + self.chunk_dimensions.z / 2,
+                        ),
+                        self.chunk_dimensions,
+                    ),
+                    octree::DEFAULT_MAX,
+                )
+            })
+            .collect::<Vec<Octree>>();
+
+        entities.extend(self.insert_mapchunks_with_octrees(&octrees, world, false));
 
         for (entity, map_data) in &mut entities {
             let map_aabb = map_data.octree.get_aabb();
